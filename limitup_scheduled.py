@@ -1551,10 +1551,8 @@ def generate_multi_day_report_file(dates_list):
     
     html = generate_multi_day_report(all_days_data)
     
-    # 文件名
-    first_date = all_days_data[0]['date']
-    last_date = all_days_data[-1]['date']
-    filename = f"涨停日报_对比_{first_date}-{last_date}.html"
+    # 固定文件名 report.html，每次覆盖
+    filename = "report.html"
     filepath = os.path.join(OUTPUT_DIR, filename)
     
     with open(filepath, 'w', encoding='utf-8') as f:
@@ -1572,7 +1570,7 @@ def generate_multi_day_report_file(dates_list):
 # ==================== GitHub Pages 发布 ====================
 
 def publish_to_github_pages(html_files):
-    """将HTML报告发布到 GitHub Pages
+    """将HTML报告发布到 GitHub Pages（覆盖 report.html）
     
     Args:
         html_files: 要发布的HTML文件路径列表
@@ -1582,51 +1580,23 @@ def publish_to_github_pages(html_files):
     
     repo_dir = os.path.dirname(os.path.abspath(__file__))
     
-    # 复制HTML文件到仓库根目录
+    # 复制HTML文件到仓库根目录，统一命名为 report.html
     for src in html_files:
         if os.path.exists(src):
             import shutil
-            shutil.copy2(src, os.path.join(repo_dir, os.path.basename(src)))
-            print(f"  [发布] 复制: {os.path.basename(src)}")
+            shutil.copy2(src, os.path.join(repo_dir, 'report.html'))
+            print(f"  [发布] 更新 report.html")
+            break
     
-    # 生成 index.html（指向最新的对比报告）
-    latest = max(html_files, key=lambda f: os.path.basename(f))
-    latest_name = os.path.basename(latest)
-    index_html = f'''<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="UTF-8">
-<meta http-equiv="refresh" content="0;url={latest_name}">
-<title>A股涨停日报</title>
-<style>
-body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #1a1a2e; color: #eee; }}
-a {{ color: #e60012; font-size: 1.2em; }}
-</style>
-</head>
-<body>
-<p>正在跳转到最新报告，如果没有自动跳转请 <a href="{latest_name}">点击这里</a></p>
-</body>
-</html>'''
-    with open(os.path.join(repo_dir, 'index.html'), 'w', encoding='utf-8') as f:
-        f.write(index_html)
-    
-    # git add 仅HTML文件 + commit + push
+    # git add + commit + push
     try:
-        # 先清理旧的报告HTML（只保留最新的，避免仓库越来越大）
-        html_files_in_repo = [f for f in os.listdir(repo_dir) 
-                             if f.endswith('.html') and f != 'index.html']
-        for old_html in html_files_in_repo:
-            if old_html != latest_name and old_html != 'index.html':
-                os.remove(os.path.join(repo_dir, old_html))
-                subprocess.run(['git', 'rm', old_html], cwd=repo_dir, capture_output=True, text=True)
-        
-        subprocess.run(['git', 'add', 'index.html', latest_name], cwd=repo_dir, capture_output=True, text=True)
+        subprocess.run(['git', 'add', 'report.html'], cwd=repo_dir, capture_output=True, text=True)
         subprocess.run(['git', 'commit', '-m', f'更新涨停日报 {datetime.now().strftime("%Y-%m-%d")}'], 
                       cwd=repo_dir, capture_output=True, text=True)
         result = subprocess.run(['git', 'push', 'origin', 'master'], cwd=repo_dir, capture_output=True, text=True, timeout=60)
         if result.returncode == 0:
             print(f"  [发布] 已推送到 GitHub Pages")
-            print(f"  [访问] https://yanghuiysz.github.io/limitup-report/")
+            print(f"  [访问] https://yanghuiysz.github.io/limitup-report/report.html")
         else:
             print(f"  [发布] 推送失败: {result.stderr[:200]}")
     except Exception as e:
