@@ -1451,9 +1451,14 @@ def generate_multi_day_report_file(dates_list):
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     all_days_data = []
     
-    # 判断哪些日期需要计算历史涨跌家数
+    # 判断哪些日期需要计算涨跌家数
+    # - 历史日期：缓存未命中的需要K线统计
+    # - 当天：收盘后（15:00后）也用K线统计，因为实时接口涨跌家数不准
+    now_time = datetime.now()
+    is_after_close = now_time.hour >= 15
     dates_need_kline = [d for d in dates_list
-                        if d != TODAY and cache_get_market_stats(d) is None]
+                        if (d != TODAY and cache_get_market_stats(d) is None)
+                        or (d == TODAY and is_after_close)]
     
     # 只在确实需要时才获取全量股票列表
     stock_codes = []
@@ -1470,7 +1475,7 @@ def generate_multi_day_report_file(dates_list):
         
         # ---- 1. 涨停个股数据（先查缓存）----
         cached_stocks = cache_get_limit_stocks(date_str)
-        if cached_stocks and date_str != TODAY:
+        if cached_stocks and (date_str != TODAY or is_after_close):
             print(f"  [1/4] 涨停个股: 命中缓存 ({len(cached_stocks)} 只)")
             stocks = cached_stocks
         else:
@@ -1495,7 +1500,7 @@ def generate_multi_day_report_file(dates_list):
         
         # ---- 3. 市场统计（先查缓存）----
         cached_mkt = cache_get_market_stats(date_str)
-        if cached_mkt and date_str != TODAY:
+        if cached_mkt and (date_str != TODAY or is_after_close):
             print(f"  [3/4] 市场统计: 命中缓存 "
                   f"涨停:{cached_mkt.get('limit_up')} 跌停:{cached_mkt.get('limit_down')} "
                   f"上涨:{cached_mkt.get('up')} 下跌:{cached_mkt.get('down')}")
@@ -1513,22 +1518,25 @@ def generate_multi_day_report_file(dates_list):
             
             # 上涨/下跌家数
             print("  [4/4] 统计涨跌家数...")
-            if date_str == TODAY:
+            if date_str == TODAY and not is_after_close:
+                # 盘中：用实时接口（不完整但至少有数据）
                 today_stats = get_market_stats()
                 if today_stats:
                     market_stats['up'] = today_stats.get('up')
                     market_stats['down'] = today_stats.get('down')
                     print(f"  上涨:{market_stats['up']} 下跌:{market_stats['down']} (实时接口)")
             else:
+                # 收盘后或历史日期：用全量K线统计
                 up_down = get_historical_up_down(date_str, stock_list=stock_codes)
                 if up_down:
                     market_stats['up'] = up_down['up']
                     market_stats['down'] = up_down['down']
                     market_stats['flat'] = up_down.get('flat', 0)
-                    print(f"  上涨:{up_down['up']} 下跌:{up_down['down']} (历史K线)")
+                    label = "收盘K线" if date_str == TODAY else "历史K线"
+                    print(f"  上涨:{up_down['up']} 下跌:{up_down['down']} ({label})")
             
             # 写入缓存
-            if date_str != TODAY and market_stats:
+            if market_stats:
                 cache_set_market_stats(date_str, market_stats)
         
         # 按成交额排序
