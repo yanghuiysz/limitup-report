@@ -21,8 +21,8 @@ from collections import defaultdict
 OUTPUT_DIR = r"C:\Users\yanghui\Desktop\涨停日报"
 OUTPUT_FILE = os.path.join(OUTPUT_DIR, f"涨停日报_{datetime.now().strftime('%Y%m%d')}.html")
 
-# GitHub Pages 发布目录（仓库内的 report 子目录）
-GITHUB_PAGES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "report")
+# GitHub Pages 发布（仓库根目录）
+GITHUB_PAGES_DIR = os.path.dirname(os.path.abspath(__file__))
 GITHUB_REPO_URL = "https://github.com/yanghuiysz/limitup-report.git"
 
 TODAY = datetime.now().strftime("%Y%m%d")
@@ -1581,14 +1581,12 @@ def publish_to_github_pages(html_files):
         return
     
     repo_dir = os.path.dirname(os.path.abspath(__file__))
-    report_dir = GITHUB_PAGES_DIR
-    os.makedirs(report_dir, exist_ok=True)
     
-    # 复制HTML文件到 report 目录
+    # 复制HTML文件到仓库根目录
     for src in html_files:
         if os.path.exists(src):
             import shutil
-            shutil.copy2(src, os.path.join(report_dir, os.path.basename(src)))
+            shutil.copy2(src, os.path.join(repo_dir, os.path.basename(src)))
             print(f"  [发布] 复制: {os.path.basename(src)}")
     
     # 生成 index.html（指向最新的对比报告）
@@ -1599,9 +1597,9 @@ def publish_to_github_pages(html_files):
 <head>
 <meta charset="UTF-8">
 <meta http-equiv="refresh" content="0;url={latest_name}">
-<title>涨停日报</title>
+<title>A股涨停日报</title>
 <style>
-body {{ font-family: -apple-system, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #1a1a2e; color: #eee; }}
+body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #1a1a2e; color: #eee; }}
 a {{ color: #e60012; font-size: 1.2em; }}
 </style>
 </head>
@@ -1609,17 +1607,26 @@ a {{ color: #e60012; font-size: 1.2em; }}
 <p>正在跳转到最新报告，如果没有自动跳转请 <a href="{latest_name}">点击这里</a></p>
 </body>
 </html>'''
-    with open(os.path.join(report_dir, 'index.html'), 'w', encoding='utf-8') as f:
+    with open(os.path.join(repo_dir, 'index.html'), 'w', encoding='utf-8') as f:
         f.write(index_html)
     
-    # git add + commit + push
+    # git add 仅HTML文件 + commit + push
     try:
-        subprocess.run(['git', 'add', 'report/'], cwd=repo_dir, capture_output=True, text=True)
+        # 先清理旧的报告HTML（只保留最新的，避免仓库越来越大）
+        html_files_in_repo = [f for f in os.listdir(repo_dir) 
+                             if f.endswith('.html') and f != 'index.html']
+        for old_html in html_files_in_repo:
+            if old_html != latest_name and old_html != 'index.html':
+                os.remove(os.path.join(repo_dir, old_html))
+                subprocess.run(['git', 'rm', old_html], cwd=repo_dir, capture_output=True, text=True)
+        
+        subprocess.run(['git', 'add', 'index.html', latest_name], cwd=repo_dir, capture_output=True, text=True)
         subprocess.run(['git', 'commit', '-m', f'更新涨停日报 {datetime.now().strftime("%Y-%m-%d")}'], 
                       cwd=repo_dir, capture_output=True, text=True)
-        result = subprocess.run(['git', 'push', 'origin', 'main'], cwd=repo_dir, capture_output=True, text=True, timeout=60)
+        result = subprocess.run(['git', 'push', 'origin', 'master'], cwd=repo_dir, capture_output=True, text=True, timeout=60)
         if result.returncode == 0:
             print(f"  [发布] 已推送到 GitHub Pages")
+            print(f"  [访问] https://yanghuiysz.github.io/limitup-report/")
         else:
             print(f"  [发布] 推送失败: {result.stderr[:200]}")
     except Exception as e:
