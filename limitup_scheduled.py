@@ -971,8 +971,6 @@ tr:hover td {{ background:#fffef0 !important; transition:background .15s; }}
     </div>
 
     <div class="stats">
-        <div class="stat-card"><div class="num" style="color:#e60012">{mkt_stats.get('up', '-')}</div><div class="label">上涨家数</div></div>
-        <div class="stat-card"><div class="num" style="color:#52c41a">{mkt_stats.get('down', '-')}</div><div class="label">下跌家数</div></div>
         <div class="stat-card"><div class="num" style="color:#ff4d4f">{mkt_stats.get('limit_up', '-')}</div><div class="label">涨停家数</div></div>
         <div class="stat-card"><div class="num" style="color:#52c41a">{mkt_stats.get('limit_down', '-')}</div><div class="label">跌停家数</div></div>
         <div class="stat-card"><div class="num">{total}</div><div class="label">涨停总数</div></div>
@@ -1051,8 +1049,6 @@ def generate_multi_day_report(all_days_data):
     chart_dates = []
     chart_limit_up = []
     chart_limit_down = []
-    chart_up = []
-    chart_down = []
     
     for idx, day_data in enumerate(all_days_data):
         day_date = day_data['date']
@@ -1066,8 +1062,6 @@ def generate_multi_day_report(all_days_data):
         mkt = day_data.get('market_stats') or {}
         limit_up_count = mkt.get('limit_up', total)
         limit_down_count = mkt.get('limit_down', 0)
-        up_count = mkt.get('up')
-        down_count = mkt.get('down')
         
         # 折线图数据
         # 将 YYYYMMDD 转为 MM-DD 格式用于图表显示
@@ -1075,8 +1069,7 @@ def generate_multi_day_report(all_days_data):
         chart_dates.append(display_date)
         chart_limit_up.append(limit_up_count)
         chart_limit_down.append(limit_down_count)
-        chart_up.append(up_count)
-        chart_down.append(down_count)
+
 
         # 概念分类卡片
         reason_section_html = ""
@@ -1149,11 +1142,8 @@ def generate_multi_day_report(all_days_data):
             color = slot_colors[i % len(slot_colors)]
             tag_cloud += f'<span class="hot-tag" style="font-size:{size}px;color:{color};border-color:{color}40;background:{color}08">{reason} ({count})</span>'
 
-        # 涨跌家数显示（有数据显示数据，无数据提示历史不可用）
-        up_display = str(up_count) if up_count is not None else '-'
-        down_display = str(down_count) if down_count is not None else '-'
-        up_note = '' if up_count is not None else '<div style="font-size:10px;color:#bbb;margin-top:2px">仅当日</div>'
-        down_note = '' if down_count is not None else '<div style="font-size:10px;color:#bbb;margin-top:2px">仅当日</div>'
+        # tag cloud
+        tag_cloud = ''
 
         # tab button (用 data-date 属性，避免 event.target 在 span 上失效)
         tab_buttons += f'<button class="tab-btn {active}" data-date="{day_date}" onclick="switchTab(this)">{day_date} <span style="font-size:11px;opacity:.7">{total}只</span></button>'
@@ -1161,8 +1151,6 @@ def generate_multi_day_report(all_days_data):
         tab_panels += f"""
     <div class="tab-panel" id="panel-{day_date}" style="display:{'block' if active else 'none'}">
         <div class="stats">
-            <div class="stat-card"><div class="num" style="color:#e60012">{up_display}</div><div class="label">上涨家数</div>{up_note}</div>
-            <div class="stat-card"><div class="num" style="color:#52c41a">{down_display}</div><div class="label">下跌家数</div>{down_note}</div>
             <div class="stat-card"><div class="num" style="color:#ff4d4f">{limit_up_count}</div><div class="label">涨停家数</div></div>
             <div class="stat-card"><div class="num" style="color:#13c2c2">{limit_down_count}</div><div class="label">跌停家数</div></div>
             <div class="stat-card"><div class="num">{total}</div><div class="label">涨停总数</div></div>
@@ -1184,8 +1172,6 @@ def generate_multi_day_report(all_days_data):
         'dates': chart_dates,
         'limit_up': chart_limit_up,
         'limit_down': chart_limit_down,
-        'up': chart_up,
-        'down': chart_down,
     })
 
     # ============ 组装完整HTML ============
@@ -1258,16 +1244,10 @@ tr:hover td {{ background:#fffef0 !important; transition:background .15s; }}
         <div class="sub">数据来源：同花顺涨停池 &nbsp;|&nbsp; 生成时间：{NOW_STR}</div>
     </div>
 
-    <!-- 趋势折线图 - 两张并列 -->
-    <div style="display:flex; gap:16px; margin-bottom:16px; flex-wrap:wrap;">
-        <div class="chart-wrap" style="flex:1; min-width:300px;">
-            <h2 class="section-title">涨跌停家数趋势</h2>
-            <div id="limitChart" style="width:100%; height:320px;"></div>
-        </div>
-        <div class="chart-wrap" style="flex:1; min-width:300px;">
-            <h2 class="section-title">上涨/下跌家数趋势</h2>
-            <div id="updownChart" style="width:100%; height:320px;"></div>
-        </div>
+    <!-- 趋势折线图 -->
+    <div class="chart-wrap" style="margin-bottom:16px;">
+        <h2 class="section-title">涨跌停家数趋势</h2>
+        <div id="limitChart" style="width:100%; height:320px;"></div>
     </div>
 
     <div class="tab-bar">{tab_buttons}</div>
@@ -1328,58 +1308,8 @@ limitChart.setOption({{
     ]
 }});
 
-// 涨跌幅趋势图
-var updownDom = document.getElementById('updownChart');
-var updownChart = echarts.init(updownDom);
-updownChart.setOption({{
-    tooltip: {{ trigger: 'axis', axisPointer: {{ type: 'cross' }} }},
-    legend: {{ data: ['上涨家数', '下跌家数'], bottom: 0 }},
-    grid: {{ left: '3%', right: '4%', bottom: '12%', top: '8%', containLabel: true }},
-    xAxis: {{
-        type: 'category',
-        data: chartData.dates,
-        axisLabel: {{ fontSize: 13, fontWeight: 'bold' }}
-    }},
-    yAxis: {{ type: 'value', name: '家数', axisLabel: {{ fontSize: 12 }} }},
-    series: [
-        {{
-            name: '上涨家数',
-            type: 'line',
-            data: chartData.up,
-            smooth: true,
-            symbol: 'diamond',
-            symbolSize: 10,
-            lineStyle: {{ width: 3, color: '#e60012' }},
-            itemStyle: {{ color: '#e60012', borderColor: '#fff', borderWidth: 2 }},
-            areaStyle: {{
-                color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-                    {{ offset: 0, color: 'rgba(230,0,18,0.18)' }},
-                    {{ offset: 1, color: 'rgba(230,0,18,0.02)' }}
-                ])
-            }}
-        }},
-        {{
-            name: '下跌家数',
-            type: 'line',
-            data: chartData.down,
-            smooth: true,
-            symbol: 'diamond',
-            symbolSize: 10,
-            lineStyle: {{ width: 3, color: '#52c41a' }},
-            itemStyle: {{ color: '#52c41a', borderColor: '#fff', borderWidth: 2 }},
-            areaStyle: {{
-                color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-                    {{ offset: 0, color: 'rgba(82,196,26,0.15)' }},
-                    {{ offset: 1, color: 'rgba(82,196,26,0.02)' }}
-                ])
-            }}
-        }}
-    ]
-}});
-
 window.addEventListener('resize', function() {{
     limitChart.resize();
-    updownChart.resize();
 }});
 
 // Tab切换
@@ -1453,22 +1383,8 @@ def generate_multi_day_report_file(dates_list):
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     all_days_data = []
     
-    # 判断哪些日期需要计算涨跌家数
-    # - 历史日期：缓存未命中的需要K线统计
-    # - 当天：收盘后（15:00后）也用K线统计，因为实时接口涨跌家数不准
     now_time = datetime.now()
     is_after_close = now_time.hour >= 15
-    dates_need_kline = [d for d in dates_list
-                        if (d != TODAY and cache_get_market_stats(d) is None)
-                        or (d == TODAY and is_after_close)]
-    
-    # 只在确实需要时才获取全量股票列表
-    stock_codes = []
-    if dates_need_kline:
-        print(f"  以下日期需要K线统计涨跌家数: {dates_need_kline}")
-        print("  预获取A股股票列表...")
-        stock_codes = _fetch_stock_codes()
-        print(f"  共 {len(stock_codes)} 只股票")
     
     for i, date_str in enumerate(dates_list):
         print(f"\n{'='*60}")
@@ -1502,55 +1418,25 @@ def generate_multi_day_report_file(dates_list):
         
         # ---- 3. 市场统计（先查缓存）----
         cached_mkt = cache_get_market_stats(date_str)
-        # 当天缓存命中但up/down为None时，视为不完整，需要继续补充
-        cache_incomplete = (cached_mkt and date_str == TODAY and
-                            cached_mkt.get('up') is None and cached_mkt.get('down') is None)
-        if cached_mkt and (date_str != TODAY or is_after_close) and not cache_incomplete:
-            print(f"  [3/4] 市场统计: 命中缓存 "
-                  f"涨停:{cached_mkt.get('limit_up')} 跌停:{cached_mkt.get('limit_down')} "
-                  f"上涨:{cached_mkt.get('up')} 下跌:{cached_mkt.get('down')}")
+        if cached_mkt and (date_str != TODAY or is_after_close):
+            print(f"  [3/3] 市场统计: 命中缓存 "
+                  f"涨停:{cached_mkt.get('limit_up')} 跌停:{cached_mkt.get('limit_down')}")
             market_stats = cached_mkt
         else:
             market_stats = {}
             
             # 涨停/跌停统计（同花顺）
-            print("  [3/4] 获取涨停/跌停统计...")
+            print("  [3/3] 获取涨停/跌停统计...")
             ths_stats = get_ths_limitup_stats(date_str)
             if ths_stats:
                 market_stats['limit_up'] = ths_stats['limit_up']
                 market_stats['limit_down'] = ths_stats['limit_down']
                 print(f"  涨停:{ths_stats['limit_up']} 跌停:{ths_stats['limit_down']}")
             
-            # 上涨/下跌家数
-            print("  [4/4] 统计涨跌家数...")
-            if date_str == TODAY and not is_after_close:
-                # 盘中：用实时接口（不完整但至少有数据）
-                today_stats = get_market_stats()
-                if today_stats:
-                    market_stats['up'] = today_stats.get('up')
-                    market_stats['down'] = today_stats.get('down')
-                    print(f"  上涨:{market_stats['up']} 下跌:{market_stats['down']} (实时接口)")
-            else:
-                # 收盘后或历史日期：优先用全量K线统计
-                up_down = get_historical_up_down(date_str, stock_list=stock_codes)
-                if up_down:
-                    market_stats['up'] = up_down['up']
-                    market_stats['down'] = up_down['down']
-                    market_stats['flat'] = up_down.get('flat', 0)
-                    label = "收盘K线" if date_str == TODAY else "历史K线"
-                    print(f"  上涨:{up_down['up']} 下跌:{up_down['down']} ({label})")
-                elif date_str == TODAY:
-                    # 当天K线统计失败（如股票列表获取失败），fallback到实时接口
-                    print("  K线统计失败，尝试实时接口...")
-                    today_stats = get_market_stats()
-                    if today_stats:
-                        market_stats['up'] = today_stats.get('up')
-                        market_stats['down'] = today_stats.get('down')
-                        print(f"  上涨:{market_stats['up']} 下跌:{market_stats['down']} (实时接口fallback)")
-            
             # 写入缓存
             if market_stats:
                 cache_set_market_stats(date_str, market_stats)
+
         
         # 按成交额排序
         stocks.sort(key=lambda x: x.get('em_amount', 0), reverse=True)
@@ -1651,16 +1537,18 @@ def main():
     print(f"  共获取 {len(ths_stocks)} 只涨停股票")
 
     # 2. 补充东方财富成交额
-    print("[2/3] 正在补充东方财富成交额数据...")
+    print("[2/2] 正在补充东方财富成交额数据...")
     get_em_amount_batch(ths_stocks)
 
-    # 3. 获取全市场涨跌统计
-    print("[3/3] 正在获取全市场涨跌统计...")
-    market_stats = get_market_stats()
-    if market_stats:
-        print(f"  上涨:{market_stats['up']} 下跌:{market_stats['down']} 涨停:{market_stats['limit_up']} 跌停:{market_stats['limit_down']}")
-    else:
-        print("  获取市场统计失败，将跳过")
+    # 3. 获取涨停/跌停统计（同花顺）
+    print("[3/2] 正在获取涨停/跌停统计...")
+    ths_stats = get_ths_limitup_stats()
+    market_stats = {'limit_up': 0, 'limit_down': 0}
+    if ths_stats:
+        market_stats['limit_up'] = ths_stats['limit_up']
+        market_stats['limit_down'] = ths_stats['limit_down']
+        print(f"  涨停:{ths_stats['limit_up']} 跌停:{ths_stats['limit_down']}")
+
 
     # 按成交额排序
     ths_stocks.sort(key=lambda x: x.get('em_amount', 0), reverse=True)
