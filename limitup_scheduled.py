@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 涨停日报自动生成脚本
-数据源：同花顺涨停池 + 东方财富批量行情
+数据源：同花顺涨停池
 输出：桌面 涨停日报/YYYYMMDD.html
 """
 import requests
@@ -42,9 +42,11 @@ EM_HEADERS = {
 
 THS_SESSION = requests.Session()
 THS_SESSION.headers.update(THS_HEADERS)
+THS_SESSION.trust_env = False  # 禁用系统代理，避免代理问题
 
 EM_SESSION = requests.Session()
 EM_SESSION.headers.update(EM_HEADERS)
+EM_SESSION.trust_env = False  # 禁用系统代理，避免代理问题
 
 
 # ==================== SQLite 缓存模块 ====================
@@ -245,7 +247,7 @@ def _get_stock_change_kline(code, date_str):
 
 
 def get_historical_up_down(date_str, stock_list=None, max_workers=50):
-    """通过东方财富全量K线统计指定日期的涨跌家数
+    """通过东方财富全量K线统计指定日期的涨跌家数（可选，失败返回None）
     
     Args:
         date_str: 日期字符串，格式'YYYYMMDD'
@@ -266,7 +268,7 @@ def get_historical_up_down(date_str, stock_list=None, max_workers=50):
                    f"&np=1&fltt=2&invt=2&fid=f12"
                    f"&fs=m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23&fields=f12,f14")
             try:
-                r = EM_SESSION.get(url, timeout=10)
+                r = EM_SESSION.get(url, timeout=5)
                 d = r.json()
                 diff = d['data']['diff']
                 if not diff:
@@ -415,7 +417,7 @@ def get_ths_limitup_all(date_str=None):
 
 
 def get_em_amount_batch(stocks):
-    """从东方财富批量获取成交额"""
+    """从东方财富批量获取成交额（可选，失败不影响主流程）"""
     if not stocks:
         return
 
@@ -436,7 +438,7 @@ def get_em_amount_batch(stocks):
     }
 
     try:
-        response = EM_SESSION.get(url, params=params, timeout=15)
+        response = EM_SESSION.get(url, params=params, timeout=5)
         response.raise_for_status()
         data = response.json()
 
@@ -451,10 +453,9 @@ def get_em_amount_batch(stocks):
                     if not code_to_stock[code].get('change_rate'):
                         code_to_stock[code]['change_rate'] = change_pct / 100 if change_pct else 0
             print(f"  成功获取 {len(diff_list)}/{len(stocks)} 只个股行情")
-        else:
-            print(f"  批量接口返回异常: rc={data.get('rc')}")
-    except Exception as e:
-            print(f"  批量获取成交额失败: {str(e)}")
+    except Exception:
+        # 东方财富失败不影响主流程，成交额显示为"-"
+        pass
 
 
 def get_historical_amount_batch(stocks, date_str):
@@ -575,11 +576,20 @@ def get_historical_amount_batch(stocks, date_str):
 
 
 def get_market_stats():
-    """从东方财富获取全市场涨跌统计（上涨/下跌/涨停/跌停家数）
+    """获取全市场涨跌统计（上涨/下跌/涨停/跌停家数）
     
-    注意：f104(上涨家数)/f105(下跌家数)仅支持实时数据，收盘后仍有效。
-    f106(涨停)/f152(跌停)也是实时的。
+    优先使用同花顺数据获取涨停/跌停数。
+    上涨/下跌家数需要东方财富接口，如果失败则返回None。
     """
+    result = {'up': None, 'down': None, 'limit_up': 0, 'limit_down': 0}
+    
+    # 1. 从同花顺获取涨停/跌停数（主要数据源）
+    ths_stats = get_ths_limitup_stats()
+    if ths_stats:
+        result['limit_up'] = ths_stats['limit_up']
+        result['limit_down'] = ths_stats['limit_down']
+    
+    # 2. 尝试从东方财富获取上涨/下跌家数（可选）
     url = "https://push2.eastmoney.com/api/qt/ulist.np/get"
     params = {
         "fields": "f104,f105,f106,f152",
@@ -587,28 +597,20 @@ def get_market_stats():
         "fltt": "2",
     }
     try:
-        response = EM_SESSION.get(url, params=params, timeout=10)
+        response = EM_SESSION.get(url, params=params, timeout=5)
         response.raise_for_status()
         data = response.json()
         if data.get('rc') == 0 and 'data' in data:
             diff = data['data'].get('diff', [])
             if diff:
                 item = diff[0]
-                result = {
-                    'up': item.get('f104', 0) or 0,
-                    'down': item.get('f105', 0) or 0,
-                    'limit_up': item.get('f106', 0) or 0,
-                    'limit_down': item.get('f152', 0) or 0,
-                }
-                # 补充同花顺涨停/跌停数据（更准确，区分涨停开板）
-                ths_stats = get_ths_limitup_stats()
-                if ths_stats:
-                    result['limit_up'] = ths_stats['limit_up']
-                    result['limit_down'] = ths_stats['limit_down']
-                return result
-    except Exception as e:
-        print(f"  获取市场统计失败: {str(e)}")
-    return None
+                result['up'] = item.get('f104') or None
+                result['down'] = item.get('f105') or None
+    except Exception:
+        # 东方财富失败不影响主流程，上涨/下跌家数显示为"-"
+        pass
+    
+    return result
 
 
 # ==================== 涨停原因概念合并 ====================
@@ -965,7 +967,7 @@ tr:hover td {{ background:#fffef0 !important; transition:background .15s; }}
 <div class="wrap">
     <div class="header">
         <h1>涨停日报</h1>
-        <div class="sub">数据来源：同花顺涨停池 + 东方财富行情 &nbsp;|&nbsp; 更新时间：{NOW_STR}</div>
+        <div class="sub">数据来源：同花顺涨停池 &nbsp;|&nbsp; 更新时间：{NOW_STR}</div>
     </div>
 
     <div class="stats">
@@ -991,7 +993,7 @@ tr:hover td {{ background:#fffef0 !important; transition:background .15s; }}
     </div>
 
     <div class="note">
-        数据来源：同花顺涨停池 + 东方财富批量行情 | 生成时间：{NOW_STR}
+        数据来源：同花顺涨停池 | 生成时间：{NOW_STR}
     </div>
 </div>
 <script>
@@ -1253,7 +1255,7 @@ tr:hover td {{ background:#fffef0 !important; transition:background .15s; }}
 <div class="wrap">
     <div class="header">
         <h1>涨停日报对比</h1>
-        <div class="sub">数据来源：同花顺涨停池 + 东方财富行情 &nbsp;|&nbsp; 生成时间：{NOW_STR}</div>
+        <div class="sub">数据来源：同花顺涨停池 &nbsp;|&nbsp; 生成时间：{NOW_STR}</div>
     </div>
 
     <!-- 趋势折线图 - 两张并列 -->
@@ -1271,7 +1273,7 @@ tr:hover td {{ background:#fffef0 !important; transition:background .15s; }}
     <div class="tab-bar">{tab_buttons}</div>
     <div class="tab-content">{tab_panels}</div>
 
-    <div class="note">数据来源：同花顺涨停池 + 东方财富批量行情 | 生成时间：{NOW_STR}</div>
+    <div class="note">数据来源：同花顺涨停池 | 生成时间：{NOW_STR}</div>
 </div>
 <script>
 // 图表数据
@@ -1422,14 +1424,14 @@ document.querySelectorAll('.sort-th').forEach(function(th) {{
 # ==================== 多天对比报告生成 ====================
 
 def _fetch_stock_codes():
-    """获取全量A股代码列表"""
+    """获取全量A股代码列表（东方财富，可选）"""
     stock_codes = []
     for page in range(1, 60):
         url = (f"https://push2.eastmoney.com/api/qt/clist/get?pn={page}&pz=100"
                f"&np=1&fltt=2&invt=2&fid=f12"
                f"&fs=m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23&fields=f12")
         try:
-            r = EM_SESSION.get(url, timeout=10)
+            r = EM_SESSION.get(url, timeout=5)
             d = r.json()
             diff = d['data']['diff']
             if not diff:
@@ -1500,7 +1502,10 @@ def generate_multi_day_report_file(dates_list):
         
         # ---- 3. 市场统计（先查缓存）----
         cached_mkt = cache_get_market_stats(date_str)
-        if cached_mkt and (date_str != TODAY or is_after_close):
+        # 当天缓存命中但up/down为None时，视为不完整，需要继续补充
+        cache_incomplete = (cached_mkt and date_str == TODAY and
+                            cached_mkt.get('up') is None and cached_mkt.get('down') is None)
+        if cached_mkt and (date_str != TODAY or is_after_close) and not cache_incomplete:
             print(f"  [3/4] 市场统计: 命中缓存 "
                   f"涨停:{cached_mkt.get('limit_up')} 跌停:{cached_mkt.get('limit_down')} "
                   f"上涨:{cached_mkt.get('up')} 下跌:{cached_mkt.get('down')}")
@@ -1526,7 +1531,7 @@ def generate_multi_day_report_file(dates_list):
                     market_stats['down'] = today_stats.get('down')
                     print(f"  上涨:{market_stats['up']} 下跌:{market_stats['down']} (实时接口)")
             else:
-                # 收盘后或历史日期：用全量K线统计
+                # 收盘后或历史日期：优先用全量K线统计
                 up_down = get_historical_up_down(date_str, stock_list=stock_codes)
                 if up_down:
                     market_stats['up'] = up_down['up']
@@ -1534,6 +1539,14 @@ def generate_multi_day_report_file(dates_list):
                     market_stats['flat'] = up_down.get('flat', 0)
                     label = "收盘K线" if date_str == TODAY else "历史K线"
                     print(f"  上涨:{up_down['up']} 下跌:{up_down['down']} ({label})")
+                elif date_str == TODAY:
+                    # 当天K线统计失败（如股票列表获取失败），fallback到实时接口
+                    print("  K线统计失败，尝试实时接口...")
+                    today_stats = get_market_stats()
+                    if today_stats:
+                        market_stats['up'] = today_stats.get('up')
+                        market_stats['down'] = today_stats.get('down')
+                        print(f"  上涨:{market_stats['up']} 下跌:{market_stats['down']} (实时接口fallback)")
             
             # 写入缓存
             if market_stats:
@@ -1597,6 +1610,11 @@ def publish_to_github_pages(html_files):
             break
     
     # git add + commit + push
+    # 注意：GitHub推送需要代理，使用GIT_CONFIG_GLOBAL临时配置
+    import os as _os
+    git_env = _os.environ.copy()
+    # 保留仓库特定的代理配置（如果存在）
+    # 不修改全局git配置，只使用当前仓库的配置
     try:
         subprocess.run(['git', 'add', 'report.html'], cwd=repo_dir, capture_output=True, text=True)
         subprocess.run(['git', 'commit', '-m', f'更新涨停日报 {datetime.now().strftime("%Y-%m-%d")}'], 
